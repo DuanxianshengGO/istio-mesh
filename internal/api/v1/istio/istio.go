@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/KubeOperator/kubepi/internal/api/v1/session"
 	v1Cluster "github.com/KubeOperator/kubepi/internal/model/v1/cluster"
@@ -375,15 +376,387 @@ func (h *Handler) generateTLSTransport(c *v1Cluster.Cluster, profile session.Use
 
 // analyzeTraffic 分析流量路由关系
 func (h *Handler) analyzeTraffic(clusterName, namespace string) interface{} {
-	// TODO: 实现流量分析逻辑
-	// 这里返回一个示例结构
-	return map[string]interface{}{
-		"virtualServices":  []interface{}{},
-		"destinationRules": []interface{}{},
-		"gateways":         []interface{}{},
-		"trafficRoutes":    []interface{}{},
-		"podTraffic":       []interface{}{},
+	// 获取集群信息
+	c, err := h.clusterService.Get(clusterName, common.DBOptions{})
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("get cluster failed: %s", err.Error()),
+		}
 	}
+
+	// 生成 TLS 传输层
+	profile := session.UserProfile{Name: "admin", IsAdministrator: true}
+	ts, err := h.generateTLSTransport(c, profile)
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("generate TLS transport failed: %s", err.Error()),
+		}
+	}
+
+	httpClient := http.Client{Transport: ts}
+	baseURL := c.Spec.Connect.Forward.ApiServer
+
+	// 获取所有 VirtualService
+	virtualServices, err := h.fetchVirtualServices(httpClient, baseURL, namespace)
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("fetch VirtualServices failed: %s", err.Error()),
+		}
+	}
+
+	// 获取所有 DestinationRule
+	destinationRules, err := h.fetchDestinationRules(httpClient, baseURL, namespace)
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("fetch DestinationRules failed: %s", err.Error()),
+		}
+	}
+
+	// 获取所有 Pod
+	pods, err := h.fetchPods(httpClient, baseURL, namespace)
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("fetch Pods failed: %s", err.Error()),
+		}
+	}
+
+	// 分析流量关系
+	trafficAnalysis := h.analyzeTrafficFlow(virtualServices, destinationRules, pods)
+
+	return trafficAnalysis
+}
+
+// fetchVirtualServices 获取所有 VirtualService
+func (h *Handler) fetchVirtualServices(httpClient http.Client, baseURL, namespace string) ([]map[string]interface{}, error) {
+	apiPath := "/apis/networking.istio.io/v1beta1"
+	if namespace != "" {
+		apiPath = fmt.Sprintf("%s/namespaces/%s/virtualservices", apiPath, namespace)
+	} else {
+		apiPath = fmt.Sprintf("%s/virtualservices", apiPath)
+	}
+
+	fullURL := fmt.Sprintf("%s%s", baseURL, apiPath)
+	resp, err := httpClient.Get(fullURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	items, ok := result["items"].([]interface{})
+	if !ok {
+		return []map[string]interface{}{}, nil
+	}
+
+	var virtualServices []map[string]interface{}
+	for _, item := range items {
+		if vs, ok := item.(map[string]interface{}); ok {
+			virtualServices = append(virtualServices, vs)
+		}
+	}
+
+	return virtualServices, nil
+}
+
+// fetchDestinationRules 获取所有 DestinationRule
+func (h *Handler) fetchDestinationRules(httpClient http.Client, baseURL, namespace string) ([]map[string]interface{}, error) {
+	apiPath := "/apis/networking.istio.io/v1beta1"
+	if namespace != "" {
+		apiPath = fmt.Sprintf("%s/namespaces/%s/destinationrules", apiPath, namespace)
+	} else {
+		apiPath = fmt.Sprintf("%s/destinationrules", apiPath)
+	}
+
+	fullURL := fmt.Sprintf("%s%s", baseURL, apiPath)
+	resp, err := httpClient.Get(fullURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	items, ok := result["items"].([]interface{})
+	if !ok {
+		return []map[string]interface{}{}, nil
+	}
+
+	var destinationRules []map[string]interface{}
+	for _, item := range items {
+		if dr, ok := item.(map[string]interface{}); ok {
+			destinationRules = append(destinationRules, dr)
+		}
+	}
+
+	return destinationRules, nil
+}
+
+// fetchPods 获取所有 Pod
+func (h *Handler) fetchPods(httpClient http.Client, baseURL, namespace string) ([]map[string]interface{}, error) {
+	apiPath := "/api/v1"
+	if namespace != "" {
+		apiPath = fmt.Sprintf("%s/namespaces/%s/pods", apiPath, namespace)
+	} else {
+		apiPath = fmt.Sprintf("%s/pods", apiPath)
+	}
+
+	fullURL := fmt.Sprintf("%s%s", baseURL, apiPath)
+	resp, err := httpClient.Get(fullURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	items, ok := result["items"].([]interface{})
+	if !ok {
+		return []map[string]interface{}{}, nil
+	}
+
+	var pods []map[string]interface{}
+	for _, item := range items {
+		if pod, ok := item.(map[string]interface{}); ok {
+			pods = append(pods, pod)
+		}
+	}
+
+	return pods, nil
+}
+
+// analyzeTrafficFlow 分析流量流向
+func (h *Handler) analyzeTrafficFlow(virtualServices, destinationRules, pods []map[string]interface{}) map[string]interface{} {
+	// 构建 DestinationRule 映射，key 为 host
+	drMap := make(map[string]map[string]interface{})
+	for _, dr := range destinationRules {
+		if spec, ok := dr["spec"].(map[string]interface{}); ok {
+			if host, ok := spec["host"].(string); ok {
+				drMap[host] = dr
+			}
+		}
+	}
+
+	// 构建 Pod 映射，key 为 service name
+	podMap := make(map[string][]map[string]interface{})
+	for _, pod := range pods {
+		if metadata, ok := pod["metadata"].(map[string]interface{}); ok {
+			if labels, ok := metadata["labels"].(map[string]interface{}); ok {
+				// 通过 app 标签关联到 service
+				if app, ok := labels["app"].(string); ok {
+					podMap[app] = append(podMap[app], pod)
+				}
+			}
+		}
+	}
+
+	var trafficAnalysis []map[string]interface{}
+
+	// 分析每个 VirtualService
+	for _, vs := range virtualServices {
+		vsName := ""
+		if metadata, ok := vs["metadata"].(map[string]interface{}); ok {
+			if name, ok := metadata["name"].(string); ok {
+				vsName = name
+			}
+		}
+
+		if spec, ok := vs["spec"].(map[string]interface{}); ok {
+			// 获取 hosts
+			hosts := []string{}
+			if hostsInterface, ok := spec["hosts"].([]interface{}); ok {
+				for _, host := range hostsInterface {
+					if hostStr, ok := host.(string); ok {
+						hosts = append(hosts, hostStr)
+					}
+				}
+			}
+
+			// 分析 HTTP 路由
+			if httpRoutes, ok := spec["http"].([]interface{}); ok {
+				for _, httpRoute := range httpRoutes {
+					if route, ok := httpRoute.(map[string]interface{}); ok {
+						// 检查是否有 match 条件（灰度流量）
+						hasMatch := false
+						if _, exists := route["match"]; exists {
+							hasMatch = true
+						}
+
+						// 分析 route 目标
+						if routeDestinations, ok := route["route"].([]interface{}); ok {
+							for _, dest := range routeDestinations {
+								if destination, ok := dest.(map[string]interface{}); ok {
+									if destInfo, ok := destination["destination"].(map[string]interface{}); ok {
+										if host, ok := destInfo["host"].(string); ok {
+											// 确定流量类型
+											trafficType := "基础流量"
+											if hasMatch {
+												trafficType = "灰度流量"
+											}
+
+											// 查找对应的 Pod
+											servicePods := podMap[host]
+											if len(servicePods) == 0 {
+												// 尝试通过其他方式匹配
+												for service, pods := range podMap {
+													if service == host || strings.Contains(host, service) {
+														servicePods = pods
+														break
+													}
+												}
+											}
+
+											if len(servicePods) == 0 {
+												// 没有找到对应的 Pod，标记为无流量
+												trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
+													"podName":     host + "-unknown",
+													"serviceName": host,
+													"vsName":      vsName,
+													"trafficType": "无流量",
+													"subset":      destInfo["subset"],
+												})
+											} else {
+												// 为每个 Pod 创建流量分析记录
+												for _, pod := range servicePods {
+													podName := ""
+													if metadata, ok := pod["metadata"].(map[string]interface{}); ok {
+														if name, ok := metadata["name"].(string); ok {
+															podName = name
+														}
+													}
+
+													trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
+														"podName":     podName,
+														"serviceName": host,
+														"vsName":      vsName,
+														"trafficType": trafficType,
+														"subset":      destInfo["subset"],
+													})
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// 处理没有 HTTP 路由的情况
+			if _, hasHttp := spec["http"]; !hasHttp {
+				for _, host := range hosts {
+					servicePods := podMap[host]
+					if len(servicePods) == 0 {
+						trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
+							"podName":     host + "-unknown",
+							"serviceName": host,
+							"vsName":      vsName,
+							"trafficType": "无流量",
+							"subset":      nil,
+						})
+					} else {
+						for _, pod := range servicePods {
+							podName := ""
+							if metadata, ok := pod["metadata"].(map[string]interface{}); ok {
+								if name, ok := metadata["name"].(string); ok {
+									podName = name
+								}
+							}
+
+							trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
+								"podName":     podName,
+								"serviceName": host,
+								"vsName":      vsName,
+								"trafficType": "基础流量",
+								"subset":      nil,
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 查找没有被 VirtualService 覆盖的 Pod（无流量）
+	coveredPods := make(map[string]bool)
+	for _, analysis := range trafficAnalysis {
+		if podName, ok := analysis["podName"].(string); ok && !strings.HasSuffix(podName, "-unknown") {
+			coveredPods[podName] = true
+		}
+	}
+
+	for _, pod := range pods {
+		podName := ""
+		serviceName := ""
+		if metadata, ok := pod["metadata"].(map[string]interface{}); ok {
+			if name, ok := metadata["name"].(string); ok {
+				podName = name
+			}
+			if labels, ok := metadata["labels"].(map[string]interface{}); ok {
+				if app, ok := labels["app"].(string); ok {
+					serviceName = app
+				}
+			}
+		}
+
+		if !coveredPods[podName] && podName != "" {
+			trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
+				"podName":     podName,
+				"serviceName": serviceName,
+				"vsName":      "",
+				"trafficType": "无流量",
+				"subset":      nil,
+			})
+		}
+	}
+
+	return map[string]interface{}{
+		"trafficAnalysis": trafficAnalysis,
+		"summary": map[string]interface{}{
+			"totalPods":    len(pods),
+			"totalVS":      len(virtualServices),
+			"totalDR":      len(destinationRules),
+			"basicTraffic": h.countTrafficType(trafficAnalysis, "基础流量"),
+			"grayTraffic":  h.countTrafficType(trafficAnalysis, "灰度流量"),
+			"noTraffic":    h.countTrafficType(trafficAnalysis, "无流量"),
+		},
+	}
+}
+
+// countTrafficType 统计指定类型的流量数量
+func (h *Handler) countTrafficType(trafficAnalysis []map[string]interface{}, trafficType string) int {
+	count := 0
+	for _, analysis := range trafficAnalysis {
+		if t, ok := analysis["trafficType"].(string); ok && t == trafficType {
+			count++
+		}
+	}
+	return count
 }
 
 // Install 安装路由

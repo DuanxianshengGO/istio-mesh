@@ -45,8 +45,14 @@ export default {
       this.loading = true
       getGateway(this.cluster, this.namespace, this.name)
         .then(res => {
-          this.item = res
-          this.yaml = JSON.parse(JSON.stringify(this.item))
+          // 处理 KubePi API 返回的数据结构
+          if (res && res.data) {
+            this.item = res.data
+            this.yaml = JSON.parse(JSON.stringify(this.item))
+          } else {
+            this.item = res
+            this.yaml = JSON.parse(JSON.stringify(this.item))
+          }
           this.loading = false
         })
         .catch(() => {

@@ -31,23 +31,51 @@
       <el-row :gutter="20" style="margin-bottom: 20px;">
         <el-col :span="6">
           <el-card>
-            <div slot="header">{{ $t('business.istio.virtual_services') }}</div>
-            <div class="metric-value">{{ analytics.virtualServices ? analytics.virtualServices.length : 0 }}</div>
+            <div slot="header">{{ $t('business.istio.total_pods') }}</div>
+            <div class="metric-value">{{ analytics.summary ? analytics.summary.totalPods : 0 }}</div>
           </el-card>
         </el-col>
         <el-col :span="6">
           <el-card>
-            <div slot="header">{{ $t('business.istio.destination_rules') }}</div>
-            <div class="metric-value">{{ analytics.destinationRules ? analytics.destinationRules.length : 0 }}</div>
+            <div slot="header">基础流量</div>
+            <div class="metric-value basic-traffic">{{ analytics.summary ? analytics.summary.basicTraffic : 0 }}</div>
           </el-card>
         </el-col>
         <el-col :span="6">
           <el-card>
-            <div slot="header">{{ $t('business.istio.gateways') }}</div>
-            <div class="metric-value">{{ analytics.gateways ? analytics.gateways.length : 0 }}</div>
+            <div slot="header">灰度流量</div>
+            <div class="metric-value gray-traffic">{{ analytics.summary ? analytics.summary.grayTraffic : 0 }}</div>
           </el-card>
         </el-col>
         <el-col :span="6">
+          <el-card>
+            <div slot="header">无流量</div>
+            <div class="metric-value no-traffic">{{ analytics.summary ? analytics.summary.noTraffic : 0 }}</div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 流量分析表格 -->
+      <el-card>
+        <div slot="header">
+          <span>流量分析详情</span>
+        </div>
+        <el-table :data="filteredTrafficData" style="width: 100%">
+          <el-table-column prop="podName" label="Pod名称" width="200"></el-table-column>
+          <el-table-column prop="serviceName" label="Service" width="150"></el-table-column>
+          <el-table-column prop="vsName" label="VirtualService" width="200"></el-table-column>
+          <el-table-column prop="trafficType" label="流量类型" width="120">
+            <template slot-scope="scope">
+              <el-tag
+                :type="getTrafficTypeColor(scope.row.trafficType)"
+                size="small">
+                {{ scope.row.trafficType }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="subset" label="Subset" width="120"></el-table-column>
+        </el-table>
+      </el-card>
           <el-card>
             <div slot="header">{{ $t('business.istio.traffic_routes') }}</div>
             <div class="metric-value">{{ analytics.trafficRoutes ? analytics.trafficRoutes.length : 0 }}</div>
@@ -154,12 +182,30 @@ export default {
       },
       services: [],
       analytics: {
-        virtualServices: [],
-        destinationRules: [],
-        gateways: [],
-        trafficRoutes: [],
-        podTraffic: []
+        trafficAnalysis: [],
+        summary: {
+          totalPods: 0,
+          totalVS: 0,
+          totalDR: 0,
+          basicTraffic: 0,
+          grayTraffic: 0,
+          noTraffic: 0
+        }
       }
+    }
+  },
+  computed: {
+    filteredTrafficData() {
+      if (!this.analytics.trafficAnalysis) return []
+
+      let data = this.analytics.trafficAnalysis
+
+      // 按服务过滤
+      if (this.filterForm.service) {
+        data = data.filter(item => item.serviceName === this.filterForm.service)
+      }
+
+      return data
     }
   },
   methods: {
@@ -167,25 +213,45 @@ export default {
       this.loading = true
       getTrafficAnalytics(this.cluster, this.filterForm.namespace)
         .then(data => {
-          this.analytics = data
-          this.renderTrafficFlowChart()
+          // 处理 KubePi API 返回的数据结构
+          if (data && data.data) {
+            this.analytics = data.data
+          } else {
+            this.analytics = data
+          }
+          this.updateServicesList()
           this.loading = false
         })
         .catch(() => {
           this.loading = false
         })
     },
-    onNamespaceChange() {
-      this.loadServices()
-      this.loadTrafficAnalytics()
-    },
-    loadServices() {
-      if (this.filterForm.namespace) {
-        listServicesWithNs(this.cluster, this.filterForm.namespace)
-          .then(data => {
-            this.services = data.items ? data.items.map(item => item.metadata.name) : []
-          })
+    updateServicesList() {
+      // 从流量分析数据中提取服务列表
+      if (this.analytics.trafficAnalysis) {
+        const serviceSet = new Set()
+        this.analytics.trafficAnalysis.forEach(item => {
+          if (item.serviceName) {
+            serviceSet.add(item.serviceName)
+          }
+        })
+        this.services = Array.from(serviceSet)
       }
+    },
+    getTrafficTypeColor(trafficType) {
+      switch (trafficType) {
+        case '基础流量':
+          return 'success'
+        case '灰度流量':
+          return 'warning'
+        case '无流量':
+          return 'info'
+        default:
+          return ''
+      }
+    },
+    onNamespaceChange() {
+      this.loadTrafficAnalytics()
     },
     resetFilter() {
       this.filterForm = {
@@ -226,7 +292,22 @@ export default {
 .metric-value {
   font-size: 24px;
   font-weight: bold;
-  color: #409EFF;
   text-align: center;
+}
+
+.metric-value.basic-traffic {
+  color: #67C23A;
+}
+
+.metric-value.gray-traffic {
+  color: #E6A23C;
+}
+
+.metric-value.no-traffic {
+  color: #909399;
+}
+
+.metric-value:not(.basic-traffic):not(.gray-traffic):not(.no-traffic) {
+  color: #409EFF;
 }
 </style>
