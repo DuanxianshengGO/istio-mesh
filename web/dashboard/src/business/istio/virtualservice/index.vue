@@ -58,7 +58,40 @@
           </div>
         </template>
       </el-table-column>
-      
+
+      <el-table-column :label="$t('business.istio.basic_subsets')" min-width="120">
+        <template v-slot:default="{row}">
+          <div v-if="getBasicSubsets(row).length > 0">
+            <el-tag v-for="subset in getBasicSubsets(row)" :key="subset" size="mini" type="success" style="margin: 2px;">
+              {{ subset }}
+            </el-tag>
+          </div>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column :label="$t('business.istio.gray_subsets')" min-width="120">
+        <template v-slot:default="{row}">
+          <div v-if="getGraySubsets(row).length > 0">
+            <el-tag v-for="subset in getGraySubsets(row)" :key="subset" size="mini" type="warning" style="margin: 2px;">
+              {{ subset }}
+            </el-tag>
+          </div>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+
+      <el-table-column :label="$t('business.istio.match_content')" min-width="200">
+        <template v-slot:default="{row}">
+          <div v-if="getMatchContent(row)">
+            <el-tooltip :content="getMatchContent(row)" placement="top">
+              <span class="match-content-text">{{ getMatchContent(row) }}</span>
+            </el-tooltip>
+          </div>
+          <span v-else>-</span>
+        </template>
+      </el-table-column>
+
       <el-table-column :label="$t('commons.table.created_time')" prop="metadata.creationTimestamp" min-width="100">
         <template v-slot:default="{row}">
           {{ row.metadata.creationTimestamp | dateFormat }}
@@ -213,6 +246,74 @@ export default {
           this.loading = false
         })
       })
+    },
+    // 获取基础路由的子集
+    getBasicSubsets(row) {
+      const subsets = new Set()
+      if (row.spec && row.spec.http) {
+        row.spec.http.forEach(httpRoute => {
+          // 没有match条件的是基础路由
+          if (!httpRoute.match && httpRoute.route) {
+            httpRoute.route.forEach(route => {
+              if (route.destination && route.destination.subset) {
+                subsets.add(route.destination.subset)
+              }
+            })
+          }
+        })
+      }
+      return Array.from(subsets)
+    },
+    // 获取灰度路由的子集
+    getGraySubsets(row) {
+      const subsets = new Set()
+      if (row.spec && row.spec.http) {
+        row.spec.http.forEach(httpRoute => {
+          // 有match条件的是灰度路由
+          if (httpRoute.match && httpRoute.route) {
+            httpRoute.route.forEach(route => {
+              if (route.destination && route.destination.subset) {
+                subsets.add(route.destination.subset)
+              }
+            })
+          }
+        })
+      }
+      return Array.from(subsets)
+    },
+    // 获取匹配内容
+    getMatchContent(row) {
+      const matchContents = []
+      if (row.spec && row.spec.http) {
+        row.spec.http.forEach(httpRoute => {
+          if (httpRoute.match) {
+            httpRoute.match.forEach(match => {
+              const conditions = []
+              if (match.uri) {
+                Object.keys(match.uri).forEach(key => {
+                  conditions.push(`URI ${key}: ${match.uri[key]}`)
+                })
+              }
+              if (match.headers) {
+                Object.keys(match.headers).forEach(headerName => {
+                  const headerValue = match.headers[headerName]
+                  if (typeof headerValue === 'object') {
+                    Object.keys(headerValue).forEach(key => {
+                      conditions.push(`Header ${headerName} ${key}: ${headerValue[key]}`)
+                    })
+                  } else {
+                    conditions.push(`Header ${headerName}: ${headerValue}`)
+                  }
+                })
+              }
+              if (conditions.length > 0) {
+                matchContents.push(conditions.join(', '))
+              }
+            })
+          }
+        })
+      }
+      return matchContents.join('; ')
     }
   },
   created() {
@@ -223,4 +324,12 @@ export default {
 </script>
 
 <style scoped>
+.match-content-text {
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
 </style>

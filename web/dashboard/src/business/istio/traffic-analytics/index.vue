@@ -37,19 +37,19 @@
         </el-col>
         <el-col :span="6">
           <el-card>
-            <div slot="header">基础流量</div>
+            <div slot="header">{{ $t('business.istio.basic_traffic') }}</div>
             <div class="metric-value basic-traffic">{{ analytics.summary ? analytics.summary.basicTraffic : 0 }}</div>
           </el-card>
         </el-col>
         <el-col :span="6">
           <el-card>
-            <div slot="header">灰度流量</div>
+            <div slot="header">{{ $t('business.istio.gray_traffic') }}</div>
             <div class="metric-value gray-traffic">{{ analytics.summary ? analytics.summary.grayTraffic : 0 }}</div>
           </el-card>
         </el-col>
         <el-col :span="6">
           <el-card>
-            <div slot="header">无流量</div>
+            <div slot="header">{{ $t('business.istio.no_traffic') }}</div>
             <div class="metric-value no-traffic">{{ analytics.summary ? analytics.summary.noTraffic : 0 }}</div>
           </el-card>
         </el-col>
@@ -60,10 +60,10 @@
         <div slot="header">
           <span>流量分析详情</span>
         </div>
-        <el-table :data="filteredTrafficData" style="width: 100%">
-          <el-table-column prop="podName" label="Pod名称" width="200"></el-table-column>
-          <el-table-column prop="serviceName" label="Service" width="150"></el-table-column>
-          <el-table-column prop="vsName" label="VirtualService" width="200"></el-table-column>
+        <el-table :data="filteredTrafficData" style="width: 100%" size="small">
+          <el-table-column prop="podName" label="Pod名称" min-width="200"></el-table-column>
+          <el-table-column prop="serviceName" label="Service" min-width="150"></el-table-column>
+          <el-table-column prop="vsName" label="VirtualService" min-width="200"></el-table-column>
           <el-table-column prop="trafficType" label="流量类型" width="120">
             <template slot-scope="scope">
               <el-tag
@@ -74,87 +74,19 @@
             </template>
           </el-table-column>
           <el-table-column prop="subset" label="Subset" width="120"></el-table-column>
+          <el-table-column prop="matchContent" :label="$t('business.istio.match_content')" min-width="200">
+            <template slot-scope="scope">
+              <el-tooltip v-if="scope.row.matchContent" :content="scope.row.matchContent" placement="top">
+                <span class="match-content-text">{{ scope.row.matchContent }}</span>
+              </el-tooltip>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
         </el-table>
       </el-card>
-          <el-card>
-            <div slot="header">{{ $t('business.istio.traffic_routes') }}</div>
-            <div class="metric-value">{{ analytics.trafficRoutes ? analytics.trafficRoutes.length : 0 }}</div>
-          </el-card>
-        </el-col>
-      </el-row>
 
-      <!-- 流量路由图 -->
-      <el-card style="margin-bottom: 20px;">
-        <div slot="header">
-          <span>{{ $t('business.istio.traffic_flow') }}</span>
-        </div>
-        <div id="traffic-flow-chart" style="height: 400px;"></div>
-      </el-card>
 
-      <!-- 服务流量详情 -->
-      <el-card>
-        <div slot="header">
-          <span>{{ $t('business.istio.service_traffic_details') }}</span>
-        </div>
-        
-        <el-tabs v-model="activeTab">
-          <el-tab-pane :label="$t('business.istio.virtual_services')" name="virtualservices">
-            <el-table :data="analytics.virtualServices" style="width: 100%">
-              <el-table-column prop="metadata.name" :label="$t('commons.table.name')" width="200"></el-table-column>
-              <el-table-column prop="metadata.namespace" :label="$t('commons.table.namespace')" width="150"></el-table-column>
-              <el-table-column :label="$t('business.istio.hosts')" width="200">
-                <template v-slot:default="{row}">
-                  <el-tag v-for="host in row.spec.hosts" :key="host" size="mini" style="margin: 2px;">
-                    {{ host }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column :label="$t('business.istio.destinations')" min-width="300">
-                <template v-slot:default="{row}">
-                  <div v-if="row.spec.http">
-                    <div v-for="(route, index) in row.spec.http" :key="index">
-                      <div v-for="(dest, destIndex) in route.route" :key="destIndex">
-                        <el-tag type="success" size="mini" style="margin: 2px;">
-                          {{ dest.destination.host }}
-                          <span v-if="dest.destination.subset">:{{ dest.destination.subset }}</span>
-                          <span v-if="dest.weight"> ({{ dest.weight }}%)</span>
-                        </el-tag>
-                      </div>
-                    </div>
-                  </div>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-tab-pane>
-          
-          <el-tab-pane :label="$t('business.istio.destination_rules')" name="destinationrules">
-            <el-table :data="analytics.destinationRules" style="width: 100%">
-              <el-table-column prop="metadata.name" :label="$t('commons.table.name')" width="200"></el-table-column>
-              <el-table-column prop="metadata.namespace" :label="$t('commons.table.namespace')" width="150"></el-table-column>
-              <el-table-column prop="spec.host" :label="$t('business.istio.host')" width="200"></el-table-column>
-              <el-table-column :label="$t('business.istio.subsets')" min-width="300">
-                <template v-slot:default="{row}">
-                  <div v-if="row.spec.subsets">
-                    <el-tag v-for="subset in row.spec.subsets" :key="subset.name" size="mini" style="margin: 2px;">
-                      {{ subset.name }}: {{ JSON.stringify(subset.labels) }}
-                    </el-tag>
-                  </div>
-                </template>
-              </el-table-column>
-            </el-table>
-          </el-tab-pane>
-          
-          <el-tab-pane :label="$t('business.istio.pod_traffic')" name="podtraffic">
-            <el-table :data="analytics.podTraffic" style="width: 100%">
-              <el-table-column prop="podName" :label="$t('business.workload.pod_name')" width="200"></el-table-column>
-              <el-table-column prop="namespace" :label="$t('commons.table.namespace')" width="150"></el-table-column>
-              <el-table-column prop="service" :label="$t('business.istio.service')" width="150"></el-table-column>
-              <el-table-column prop="version" :label="$t('business.istio.version')" width="100"></el-table-column>
-              <el-table-column prop="trafficRule" :label="$t('business.istio.traffic_rule')" min-width="300"></el-table-column>
-            </el-table>
-          </el-tab-pane>
-        </el-tabs>
-      </el-card>
+
     </div>
   </layout-content>
 </template>
@@ -244,7 +176,7 @@ export default {
           return 'success'
         case '灰度流量':
           return 'warning'
-        case '无流量':
+        case '未进行灰度':
           return 'info'
         default:
           return ''
@@ -260,21 +192,7 @@ export default {
       }
       this.loadTrafficAnalytics()
     },
-    renderTrafficFlowChart() {
-      // TODO: 使用 ECharts 或其他图表库渲染流量流向图
-      // 这里先显示一个简单的文本提示
-      const chartContainer = document.getElementById('traffic-flow-chart')
-      if (chartContainer) {
-        chartContainer.innerHTML = `
-          <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #666;">
-            <div>
-              <i class="el-icon-loading" style="font-size: 24px; margin-bottom: 10px;"></i>
-              <div>${this.$t('business.istio.traffic_flow_chart_placeholder')}</div>
-            </div>
-          </div>
-        `
-      }
-    }
+
   },
   created() {
     this.cluster = this.$route.query.cluster
@@ -282,9 +200,7 @@ export default {
     this.loadServices()
     this.loadTrafficAnalytics()
   },
-  mounted() {
-    this.renderTrafficFlowChart()
-  }
+
 }
 </script>
 
@@ -309,5 +225,14 @@ export default {
 
 .metric-value:not(.basic-traffic):not(.gray-traffic):not(.no-traffic) {
   color: #409EFF;
+}
+
+.match-content-text {
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 </style>

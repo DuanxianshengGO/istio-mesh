@@ -343,8 +343,39 @@ func (h *Handler) proxyToKubernetes(ctx *context.Context, clusterName, apiPath s
 
 		ctx.JSON(response)
 	} else {
-		// 错误响应直接返回
-		ctx.Write(body)
+		// 错误响应，先记录原始错误用于调试
+		fmt.Printf("Kubernetes API Error: %s\n", string(body))
+
+		// 解析Kubernetes错误并包装成KubePi格式
+		var k8sError map[string]interface{}
+		if err := json.Unmarshal(body, &k8sError); err != nil {
+			// 如果无法解析为JSON，直接返回原始错误
+			response := map[string]interface{}{
+				"code":    resp.StatusCode,
+				"message": string(body),
+				"success": false,
+			}
+			ctx.JSON(response)
+			return
+		}
+
+		// 提取Kubernetes错误信息
+		var message string
+		if msg, ok := k8sError["message"].(string); ok {
+			message = msg
+		} else if reason, ok := k8sError["reason"].(string); ok {
+			message = reason
+		} else {
+			message = "Unknown error"
+		}
+
+		// 包装成KubePi标准错误格式
+		response := map[string]interface{}{
+			"code":    resp.StatusCode,
+			"message": message,
+			"success": false,
+		}
+		ctx.JSON(response)
 	}
 }
 
@@ -561,176 +592,44 @@ func (h *Handler) analyzeTrafficFlow(virtualServices, destinationRules, pods []m
 		}
 	}
 
-	// 构建 Pod 映射，key 为 service name
-	podMap := make(map[string][]map[string]interface{})
-	for _, pod := range pods {
-		if metadata, ok := pod["metadata"].(map[string]interface{}); ok {
-			if labels, ok := metadata["labels"].(map[string]interface{}); ok {
-				// 通过 app 标签关联到 service
-				if app, ok := labels["app"].(string); ok {
-					podMap[app] = append(podMap[app], pod)
-				}
-			}
-		}
-	}
-
 	var trafficAnalysis []map[string]interface{}
 
-	// 分析每个 VirtualService
-	for _, vs := range virtualServices {
-		vsName := ""
-		if metadata, ok := vs["metadata"].(map[string]interface{}); ok {
-			if name, ok := metadata["name"].(string); ok {
-				vsName = name
-			}
-		}
-
-		if spec, ok := vs["spec"].(map[string]interface{}); ok {
-			// 获取 hosts
-			hosts := []string{}
-			if hostsInterface, ok := spec["hosts"].([]interface{}); ok {
-				for _, host := range hostsInterface {
-					if hostStr, ok := host.(string); ok {
-						hosts = append(hosts, hostStr)
-					}
-				}
-			}
-
-			// 分析 HTTP 路由
-			if httpRoutes, ok := spec["http"].([]interface{}); ok {
-				for _, httpRoute := range httpRoutes {
-					if route, ok := httpRoute.(map[string]interface{}); ok {
-						// 检查是否有 match 条件（灰度流量）
-						hasMatch := false
-						if _, exists := route["match"]; exists {
-							hasMatch = true
-						}
-
-						// 分析 route 目标
-						if routeDestinations, ok := route["route"].([]interface{}); ok {
-							for _, dest := range routeDestinations {
-								if destination, ok := dest.(map[string]interface{}); ok {
-									if destInfo, ok := destination["destination"].(map[string]interface{}); ok {
-										if host, ok := destInfo["host"].(string); ok {
-											// 确定流量类型
-											trafficType := "基础流量"
-											if hasMatch {
-												trafficType = "灰度流量"
-											}
-
-											// 查找对应的 Pod
-											servicePods := podMap[host]
-											if len(servicePods) == 0 {
-												// 尝试通过其他方式匹配
-												for service, pods := range podMap {
-													if service == host || strings.Contains(host, service) {
-														servicePods = pods
-														break
-													}
-												}
-											}
-
-											if len(servicePods) == 0 {
-												// 没有找到对应的 Pod，标记为无流量
-												trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
-													"podName":     host + "-unknown",
-													"serviceName": host,
-													"vsName":      vsName,
-													"trafficType": "无流量",
-													"subset":      destInfo["subset"],
-												})
-											} else {
-												// 为每个 Pod 创建流量分析记录
-												for _, pod := range servicePods {
-													podName := ""
-													if metadata, ok := pod["metadata"].(map[string]interface{}); ok {
-														if name, ok := metadata["name"].(string); ok {
-															podName = name
-														}
-													}
-
-													trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
-														"podName":     podName,
-														"serviceName": host,
-														"vsName":      vsName,
-														"trafficType": trafficType,
-														"subset":      destInfo["subset"],
-													})
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-
-			// 处理没有 HTTP 路由的情况
-			if _, hasHttp := spec["http"]; !hasHttp {
-				for _, host := range hosts {
-					servicePods := podMap[host]
-					if len(servicePods) == 0 {
-						trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
-							"podName":     host + "-unknown",
-							"serviceName": host,
-							"vsName":      vsName,
-							"trafficType": "无流量",
-							"subset":      nil,
-						})
-					} else {
-						for _, pod := range servicePods {
-							podName := ""
-							if metadata, ok := pod["metadata"].(map[string]interface{}); ok {
-								if name, ok := metadata["name"].(string); ok {
-									podName = name
-								}
-							}
-
-							trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
-								"podName":     podName,
-								"serviceName": host,
-								"vsName":      vsName,
-								"trafficType": "基础流量",
-								"subset":      nil,
-							})
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 查找没有被 VirtualService 覆盖的 Pod（无流量）
-	coveredPods := make(map[string]bool)
-	for _, analysis := range trafficAnalysis {
-		if podName, ok := analysis["podName"].(string); ok && !strings.HasSuffix(podName, "-unknown") {
-			coveredPods[podName] = true
-		}
-	}
-
+	// 为每个Pod分析流量类型
 	for _, pod := range pods {
 		podName := ""
+		podLabels := make(map[string]string)
 		serviceName := ""
+
+		// 获取Pod基本信息
 		if metadata, ok := pod["metadata"].(map[string]interface{}); ok {
 			if name, ok := metadata["name"].(string); ok {
 				podName = name
 			}
 			if labels, ok := metadata["labels"].(map[string]interface{}); ok {
-				if app, ok := labels["app"].(string); ok {
+				for k, v := range labels {
+					if vStr, ok := v.(string); ok {
+						podLabels[k] = vStr
+					}
+				}
+				// 通过app标签确定服务名
+				if app, ok := podLabels["app"]; ok {
 					serviceName = app
 				}
 			}
 		}
 
-		if !coveredPods[podName] && podName != "" {
+		// 分析这个Pod的流量类型
+		trafficResults := h.analyzePodTrafficWithSubsets(podName, serviceName, podLabels, virtualServices, drMap)
+
+		// 为每个匹配的subset创建一条记录
+		for _, result := range trafficResults {
 			trafficAnalysis = append(trafficAnalysis, map[string]interface{}{
-				"podName":     podName,
-				"serviceName": serviceName,
-				"vsName":      "",
-				"trafficType": "无流量",
-				"subset":      nil,
+				"podName":      podName,
+				"serviceName":  serviceName,
+				"vsName":       result["vsName"],
+				"trafficType":  result["type"],
+				"subset":       result["subset"],
+				"matchContent": result["matchContent"],
 			})
 		}
 	}
@@ -743,7 +642,7 @@ func (h *Handler) analyzeTrafficFlow(virtualServices, destinationRules, pods []m
 			"totalDR":      len(destinationRules),
 			"basicTraffic": h.countTrafficType(trafficAnalysis, "基础流量"),
 			"grayTraffic":  h.countTrafficType(trafficAnalysis, "灰度流量"),
-			"noTraffic":    h.countTrafficType(trafficAnalysis, "无流量"),
+			"noTraffic":    h.countTrafficType(trafficAnalysis, "未进行灰度"),
 		},
 	}
 }
@@ -757,6 +656,418 @@ func (h *Handler) countTrafficType(trafficAnalysis []map[string]interface{}, tra
 		}
 	}
 	return count
+}
+
+// analyzePodTraffic 分析单个Pod的流量类型
+func (h *Handler) analyzePodTraffic(podName, serviceName string, podLabels map[string]string, virtualServices []map[string]interface{}, drMap map[string]map[string]interface{}) map[string]interface{} {
+	// 默认返回未进行灰度
+	result := map[string]interface{}{
+		"type":   "未进行灰度",
+		"vsName": "",
+		"subset": nil,
+	}
+
+	// 遍历所有VirtualService，查找匹配的路由规则
+	for _, vs := range virtualServices {
+		vsName := ""
+		if metadata, ok := vs["metadata"].(map[string]interface{}); ok {
+			if name, ok := metadata["name"].(string); ok {
+				vsName = name
+			}
+		}
+
+		if spec, ok := vs["spec"].(map[string]interface{}); ok {
+			// 获取hosts
+			hosts := []string{}
+			if hostsInterface, ok := spec["hosts"].([]interface{}); ok {
+				for _, host := range hostsInterface {
+					if hostStr, ok := host.(string); ok {
+						hosts = append(hosts, hostStr)
+					}
+				}
+			}
+
+			// 检查这个VS是否适用于当前服务
+			serviceMatched := false
+			for _, host := range hosts {
+				// 简化匹配：host可能是服务名或FQDN
+				if host == serviceName || strings.Contains(host, serviceName) {
+					serviceMatched = true
+					break
+				}
+			}
+
+			if !serviceMatched {
+				continue
+			}
+
+			// 分析HTTP路由规则
+			if httpRoutes, ok := spec["http"].([]interface{}); ok {
+				for _, httpRoute := range httpRoutes {
+					if route, ok := httpRoute.(map[string]interface{}); ok {
+						// 检查是否有match条件（灰度流量）
+						hasMatch := false
+						if _, exists := route["match"]; exists {
+							hasMatch = true
+						}
+
+						// 分析route目标
+						if routeDestinations, ok := route["route"].([]interface{}); ok {
+							for _, dest := range routeDestinations {
+								if destination, ok := dest.(map[string]interface{}); ok {
+									if destInfo, ok := destination["destination"].(map[string]interface{}); ok {
+										if host, ok := destInfo["host"].(string); ok {
+											// 检查subset是否匹配当前Pod
+											if subset, ok := destInfo["subset"].(string); ok {
+												if h.podMatchesSubset(podLabels, host, subset, drMap) {
+													trafficType := "基础流量"
+													if hasMatch {
+														trafficType = "灰度流量"
+													}
+													return map[string]interface{}{
+														"type":   trafficType,
+														"vsName": vsName,
+														"subset": subset,
+													}
+												}
+											} else {
+												// 没有指定subset，检查是否直接匹配服务
+												if host == serviceName || strings.Contains(host, serviceName) {
+													trafficType := "基础流量"
+													if hasMatch {
+														trafficType = "灰度流量"
+													}
+													return map[string]interface{}{
+														"type":   trafficType,
+														"vsName": vsName,
+														"subset": nil,
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return result
+}
+
+// podMatchesSubset 检查Pod是否匹配DestinationRule中定义的subset
+func (h *Handler) podMatchesSubset(podLabels map[string]string, host, subset string, drMap map[string]map[string]interface{}) bool {
+	// 查找对应的DestinationRule
+	dr, exists := drMap[host]
+	if !exists {
+		return false
+	}
+
+	if spec, ok := dr["spec"].(map[string]interface{}); ok {
+		if subsets, ok := spec["subsets"].([]interface{}); ok {
+			for _, sub := range subsets {
+				if subsetMap, ok := sub.(map[string]interface{}); ok {
+					if name, ok := subsetMap["name"].(string); ok && name == subset {
+						// 找到了对应的subset，检查labels是否匹配
+						if labels, ok := subsetMap["labels"].(map[string]interface{}); ok {
+							allMatch := true
+							for labelKey, labelValue := range labels {
+								if labelValueStr, ok := labelValue.(string); ok {
+									if podLabels[labelKey] != labelValueStr {
+										allMatch = false
+										break
+									}
+								}
+							}
+							return allMatch
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// analyzePodTrafficWithSubsets 分析Pod在所有相关subset中的流量类型
+func (h *Handler) analyzePodTrafficWithSubsets(podName, serviceName string, podLabels map[string]string, virtualServices []map[string]interface{}, drMap map[string]map[string]interface{}) []map[string]interface{} {
+	var results []map[string]interface{}
+
+	// 查找与此服务相关的DestinationRule
+	var relevantDR map[string]interface{}
+	for host, dr := range drMap {
+		if host == serviceName || strings.Contains(host, serviceName) {
+			relevantDR = dr
+			break
+		}
+	}
+
+	if relevantDR == nil {
+		// 没有找到相关的DestinationRule，使用原来的逻辑
+		trafficType := h.analyzePodTraffic(podName, serviceName, podLabels, virtualServices, drMap)
+		return []map[string]interface{}{trafficType}
+	}
+
+	// 获取所有定义的subset
+	var allSubsets []map[string]interface{}
+	if spec, ok := relevantDR["spec"].(map[string]interface{}); ok {
+		if subsets, ok := spec["subsets"].([]interface{}); ok {
+			for _, subset := range subsets {
+				if subsetMap, ok := subset.(map[string]interface{}); ok {
+					allSubsets = append(allSubsets, subsetMap)
+				}
+			}
+		}
+	}
+
+	// 检查Pod是否匹配每个subset
+	for _, subset := range allSubsets {
+		subsetName := ""
+		if name, ok := subset["name"].(string); ok {
+			subsetName = name
+		}
+
+		// 检查Pod标签是否匹配subset标签
+		if h.podMatchesSubsetLabels(podLabels, subset) {
+			// 检查这个subset是否有流量路由
+			trafficType := h.getSubsetTrafficType(serviceName, subsetName, virtualServices)
+			matchContent := h.getSubsetMatchContent(serviceName, subsetName, virtualServices)
+			results = append(results, map[string]interface{}{
+				"type":         trafficType,
+				"vsName":       h.getVSNameForSubset(serviceName, subsetName, virtualServices),
+				"subset":       subsetName,
+				"matchContent": matchContent,
+			})
+		}
+	}
+
+	// 如果没有匹配任何subset，使用原来的逻辑
+	if len(results) == 0 {
+		trafficType := h.analyzePodTraffic(podName, serviceName, podLabels, virtualServices, drMap)
+		return []map[string]interface{}{trafficType}
+	}
+
+	return results
+}
+
+// podMatchesSubsetLabels 检查Pod标签是否匹配subset标签
+func (h *Handler) podMatchesSubsetLabels(podLabels map[string]string, subset map[string]interface{}) bool {
+	if labels, ok := subset["labels"].(map[string]interface{}); ok {
+		for labelKey, labelValue := range labels {
+			if labelValueStr, ok := labelValue.(string); ok {
+				if podLabels[labelKey] != labelValueStr {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// getSubsetTrafficType 获取subset的流量类型
+func (h *Handler) getSubsetTrafficType(serviceName, subsetName string, virtualServices []map[string]interface{}) string {
+	for _, vs := range virtualServices {
+		if spec, ok := vs["spec"].(map[string]interface{}); ok {
+			// 检查hosts是否匹配
+			hosts := []string{}
+			if hostsInterface, ok := spec["hosts"].([]interface{}); ok {
+				for _, host := range hostsInterface {
+					if hostStr, ok := host.(string); ok {
+						hosts = append(hosts, hostStr)
+					}
+				}
+			}
+
+			serviceMatched := false
+			for _, host := range hosts {
+				if host == serviceName || strings.Contains(host, serviceName) {
+					serviceMatched = true
+					break
+				}
+			}
+
+			if !serviceMatched {
+				continue
+			}
+
+			// 检查HTTP路由
+			if httpRoutes, ok := spec["http"].([]interface{}); ok {
+				for _, httpRoute := range httpRoutes {
+					if route, ok := httpRoute.(map[string]interface{}); ok {
+						// 检查route目标
+						if routeDestinations, ok := route["route"].([]interface{}); ok {
+							for _, dest := range routeDestinations {
+								if destination, ok := dest.(map[string]interface{}); ok {
+									if destInfo, ok := destination["destination"].(map[string]interface{}); ok {
+										if subset, ok := destInfo["subset"].(string); ok && subset == subsetName {
+											// 检查是否有match条件
+											if _, hasMatch := route["match"]; hasMatch {
+												return "灰度流量"
+											} else {
+												return "基础流量"
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return "未进行灰度"
+}
+
+// getVSNameForSubset 获取subset对应的VirtualService名称
+func (h *Handler) getVSNameForSubset(serviceName, subsetName string, virtualServices []map[string]interface{}) string {
+	for _, vs := range virtualServices {
+		vsName := ""
+		if metadata, ok := vs["metadata"].(map[string]interface{}); ok {
+			if name, ok := metadata["name"].(string); ok {
+				vsName = name
+			}
+		}
+
+		if spec, ok := vs["spec"].(map[string]interface{}); ok {
+			// 检查hosts是否匹配
+			hosts := []string{}
+			if hostsInterface, ok := spec["hosts"].([]interface{}); ok {
+				for _, host := range hostsInterface {
+					if hostStr, ok := host.(string); ok {
+						hosts = append(hosts, hostStr)
+					}
+				}
+			}
+
+			serviceMatched := false
+			for _, host := range hosts {
+				if host == serviceName || strings.Contains(host, serviceName) {
+					serviceMatched = true
+					break
+				}
+			}
+
+			if !serviceMatched {
+				continue
+			}
+
+			// 检查HTTP路由
+			if httpRoutes, ok := spec["http"].([]interface{}); ok {
+				for _, httpRoute := range httpRoutes {
+					if route, ok := httpRoute.(map[string]interface{}); ok {
+						if routeDestinations, ok := route["route"].([]interface{}); ok {
+							for _, dest := range routeDestinations {
+								if destination, ok := dest.(map[string]interface{}); ok {
+									if destInfo, ok := destination["destination"].(map[string]interface{}); ok {
+										if subset, ok := destInfo["subset"].(string); ok && subset == subsetName {
+											return vsName
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// getSubsetMatchContent 获取subset对应的匹配内容
+func (h *Handler) getSubsetMatchContent(serviceName, subsetName string, virtualServices []map[string]interface{}) string {
+	var matchContents []string
+
+	for _, vs := range virtualServices {
+		if spec, ok := vs["spec"].(map[string]interface{}); ok {
+			// 检查hosts是否匹配
+			hosts := []string{}
+			if hostsInterface, ok := spec["hosts"].([]interface{}); ok {
+				for _, host := range hostsInterface {
+					if hostStr, ok := host.(string); ok {
+						hosts = append(hosts, hostStr)
+					}
+				}
+			}
+
+			serviceMatched := false
+			for _, host := range hosts {
+				if host == serviceName || strings.Contains(host, serviceName) {
+					serviceMatched = true
+					break
+				}
+			}
+
+			if !serviceMatched {
+				continue
+			}
+
+			// 检查HTTP路由
+			if httpRoutes, ok := spec["http"].([]interface{}); ok {
+				for _, httpRoute := range httpRoutes {
+					if route, ok := httpRoute.(map[string]interface{}); ok {
+						// 检查route目标是否匹配subset
+						if routeDestinations, ok := route["route"].([]interface{}); ok {
+							subsetMatched := false
+							for _, dest := range routeDestinations {
+								if destination, ok := dest.(map[string]interface{}); ok {
+									if destInfo, ok := destination["destination"].(map[string]interface{}); ok {
+										if subset, ok := destInfo["subset"].(string); ok && subset == subsetName {
+											subsetMatched = true
+											break
+										}
+									}
+								}
+							}
+
+							// 如果subset匹配，且有match条件，提取match内容
+							if subsetMatched {
+								if matches, hasMatch := route["match"].([]interface{}); hasMatch {
+									for _, match := range matches {
+										if matchMap, ok := match.(map[string]interface{}); ok {
+											var conditions []string
+
+											// 处理URI匹配
+											if uri, ok := matchMap["uri"].(map[string]interface{}); ok {
+												for key, value := range uri {
+													conditions = append(conditions, fmt.Sprintf("URI %s: %v", key, value))
+												}
+											}
+
+											// 处理Header匹配
+											if headers, ok := matchMap["headers"].(map[string]interface{}); ok {
+												for headerName, headerValue := range headers {
+													if headerMap, ok := headerValue.(map[string]interface{}); ok {
+														for key, value := range headerMap {
+															conditions = append(conditions, fmt.Sprintf("Header %s %s: %v", headerName, key, value))
+														}
+													} else {
+														conditions = append(conditions, fmt.Sprintf("Header %s: %v", headerName, headerValue))
+													}
+												}
+											}
+
+											if len(conditions) > 0 {
+												matchContents = append(matchContents, strings.Join(conditions, ", "))
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return strings.Join(matchContents, "; ")
 }
 
 // Install 安装路由
