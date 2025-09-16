@@ -175,7 +175,7 @@ func (e *KubePiServer) setResultHandler() {
 			}
 			if len(ss) >= 3 {
 				for i := range ss {
-					if ss[i] == "proxy" || ss[i] == "ws" {
+					if ss[i] == "proxy" || ss[i] == "ws" || ss[i] == "istio" {
 						return true
 					}
 				}

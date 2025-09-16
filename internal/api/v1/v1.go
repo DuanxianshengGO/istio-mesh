@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/KubeOperator/kubepi/internal/api/v1/sso"
 	"io/ioutil"
 	"strings"
+
+	"github.com/KubeOperator/kubepi/internal/api/v1/sso"
 
 	"github.com/KubeOperator/kubepi/internal/api/v1/mfa"
 	"github.com/KubeOperator/kubepi/internal/server"
@@ -18,6 +19,7 @@ import (
 	"github.com/KubeOperator/kubepi/internal/api/v1/chart"
 	"github.com/KubeOperator/kubepi/internal/api/v1/cluster"
 	"github.com/KubeOperator/kubepi/internal/api/v1/imagerepo"
+	"github.com/KubeOperator/kubepi/internal/api/v1/istio"
 	"github.com/KubeOperator/kubepi/internal/api/v1/ldap"
 	"github.com/KubeOperator/kubepi/internal/api/v1/proxy"
 	"github.com/KubeOperator/kubepi/internal/api/v1/role"
@@ -446,5 +448,6 @@ func AddV1Route(app iris.Party) {
 	webkubectl.Install(authParty, v1Party)
 	ldap.Install(authParty)
 	imagerepo.Install(authParty)
+	istio.Install(authParty)
 	file.Install(authParty)
 }
