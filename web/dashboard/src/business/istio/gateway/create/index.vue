@@ -4,95 +4,26 @@
       <el-col :span="4"><br/></el-col>
       <el-col :span="16">
         <div class="grid-content bg-purple-light">
-          <el-form ref="form" :model="form" :rules="rules" label-width="120px" label-position="left">
-            <el-form-item :label="$t('commons.table.name')" prop="name" required>
-              <el-input v-model="form.name" clearable></el-input>
-            </el-form-item>
-            
-            <el-form-item :label="$t('commons.table.namespace')" prop="namespace" required>
-              <namespace-select v-model="form.namespace" :cluster="cluster"></namespace-select>
-            </el-form-item>
-            
-            <el-form-item :label="$t('business.istio.selector')">
-              <div v-for="(selector, index) in form.selectors" :key="index" style="display: flex; margin-bottom: 5px;">
-                <el-input v-model="selector.key" placeholder="Key" style="margin-right: 10px;"></el-input>
-                <el-input v-model="selector.value" placeholder="Value" style="margin-right: 10px;"></el-input>
-                <el-button size="mini" type="danger" @click="removeSelector(index)">
-                  {{ $t('commons.button.delete') }}
-                </el-button>
-              </div>
-              <el-button size="small" @click="addSelector">
-                {{ $t('business.common.add_label') }}
-              </el-button>
-            </el-form-item>
-            
-            <el-form-item :label="$t('business.istio.servers')">
-              <div v-for="(server, index) in form.servers" :key="index" style="border: 1px solid #ddd; padding: 10px; margin-bottom: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                  <span>{{ $t('business.istio.server') }} {{ index + 1 }}</span>
-                  <el-button size="mini" type="danger" @click="removeServer(index)">
-                    {{ $t('commons.button.delete') }}
-                  </el-button>
-                </div>
-                
-                <el-form-item :label="$t('business.istio.port')" required>
-                  <el-row :gutter="10">
-                    <el-col :span="8">
-                      <el-input-number v-model="server.port.number" :min="1" :max="65535" placeholder="80"></el-input-number>
-                    </el-col>
-                    <el-col :span="8">
-                      <el-input v-model="server.port.name" placeholder="http"></el-input>
-                    </el-col>
-                    <el-col :span="8">
-                      <el-select v-model="server.port.protocol" placeholder="Protocol">
-                        <el-option label="HTTP" value="HTTP"></el-option>
-                        <el-option label="HTTPS" value="HTTPS"></el-option>
-                        <el-option label="TCP" value="TCP"></el-option>
-                        <el-option label="TLS" value="TLS"></el-option>
-                      </el-select>
-                    </el-col>
-                  </el-row>
-                </el-form-item>
-                
-                <el-form-item :label="$t('business.istio.hosts')" required>
-                  <el-select v-model="server.hosts" multiple allow-create filterable placeholder="Enter hosts">
-                    <el-option
-                      v-for="host in commonHosts"
-                      :key="host"
-                      :label="host"
-                      :value="host">
-                    </el-option>
-                  </el-select>
-                </el-form-item>
-                
-                <el-form-item v-if="server.port.protocol === 'HTTPS' || server.port.protocol === 'TLS'" :label="$t('business.istio.tls')">
-                  <el-form-item :label="$t('business.istio.tls_mode')">
-                    <el-select v-model="server.tls.mode" placeholder="TLS Mode">
-                      <el-option label="SIMPLE" value="SIMPLE"></el-option>
-                      <el-option label="MUTUAL" value="MUTUAL"></el-option>
-                      <el-option label="PASSTHROUGH" value="PASSTHROUGH"></el-option>
-                      <el-option label="ISTIO_MUTUAL" value="ISTIO_MUTUAL"></el-option>
-                    </el-select>
-                  </el-form-item>
-                  
-                  <el-form-item v-if="server.tls.mode === 'SIMPLE' || server.tls.mode === 'MUTUAL'" :label="$t('business.istio.credential_name')">
-                    <el-input v-model="server.tls.credentialName" placeholder="tls-secret"></el-input>
-                  </el-form-item>
-                </el-form-item>
-              </div>
-              
-              <el-button type="primary" size="small" @click="addServer">
-                {{ $t('business.istio.add_server') }}
-              </el-button>
-            </el-form-item>
-            
-            <el-form-item>
-              <el-button type="primary" @click="onSubmit" :loading="loading">
+          <!-- YAML创建 -->
+          <el-card>
+            <div slot="header">
+              <span>{{ $t('business.istio.yaml_create') }}</span>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+              <el-button type="primary" size="small" @click="loadTemplate">{{ $t('business.istio.load_template') }}</el-button>
+              <el-button type="success" size="small" @click="validateYaml">{{ $t('business.istio.validate_yaml') }}</el-button>
+            </div>
+
+            <yaml-editor ref="yaml_editor" :value="yamlData" :is-edit="false"></yaml-editor>
+
+            <div style="text-align: right; margin-top: 20px;">
+              <el-button @click="onCancel">{{ $t("commons.button.cancel") }}</el-button>
+              <el-button type="primary" @click="onSubmitYaml" :loading="loading">
                 {{ $t("commons.button.submit") }}
               </el-button>
-              <el-button @click="onCancel">{{ $t("commons.button.cancel") }}</el-button>
-            </el-form-item>
-          </el-form>
+            </div>
+          </el-card>
         </div>
       </el-col>
     </el-row>
@@ -101,138 +32,185 @@
 
 <script>
 import LayoutContent from "@/components/layout/LayoutContent"
-import NamespaceSelect from "@/components/namespace-select"
+import YamlEditor from "@/components/yaml-editor"
 import { createGateway } from "@/api/istio"
 
 export default {
   name: "GatewayCreate",
-  components: { 
+  components: {
     LayoutContent,
-    NamespaceSelect
+    YamlEditor
   },
   data() {
     return {
       cluster: "",
       loading: false,
-      form: {
-        name: "",
-        namespace: "",
-        selectors: [
-          { key: "istio", value: "ingressgateway" }
-        ],
-        servers: [
-          {
-            port: {
-              number: 80,
-              name: "http",
-              protocol: "HTTP"
-            },
-            hosts: ["*"],
-            tls: {
-              mode: "SIMPLE",
-              credentialName: ""
-            }
-          }
-        ]
-      },
-      rules: {
-        name: [
-          { required: true, message: this.$t("commons.rule.name"), trigger: "blur" },
-          { pattern: /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/, message: this.$t("commons.rule.name_rule"), trigger: "blur" }
-        ],
-        namespace: [
-          { required: true, message: this.$t("commons.rule.namespace"), trigger: "blur" }
-        ]
-      },
-      commonHosts: [
-        "*",
-        "example.com",
-        "api.example.com",
-        "www.example.com"
-      ]
+      yamlData: {}
     }
   },
   methods: {
-    addSelector() {
-      this.form.selectors.push({ key: "", value: "" })
+    loadTemplate() {
+      this.yamlContent = `apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: example-gateway
+  namespace: default
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - example.com
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: example-tls
+    hosts:
+    - example.com`
     },
-    removeSelector(index) {
-      if (this.form.selectors.length > 1) {
-        this.form.selectors.splice(index, 1)
-      }
-    },
-    addServer() {
-      this.form.servers.push({
-        port: {
-          number: 443,
-          name: "https",
-          protocol: "HTTPS"
-        },
-        hosts: ["*"],
-        tls: {
-          mode: "SIMPLE",
-          credentialName: ""
+    validateYaml() {
+      try {
+        if (!this.yamlContent.trim()) {
+          this.$message.error('YAML内容不能为空')
+          return false
         }
-      })
-    },
-    removeServer(index) {
-      if (this.form.servers.length > 1) {
-        this.form.servers.splice(index, 1)
+
+        if (!this.yamlContent.includes('apiVersion') ||
+            !this.yamlContent.includes('kind') ||
+            !this.yamlContent.includes('metadata')) {
+          this.$message.error('YAML格式不正确，缺少必要字段')
+          return false
+        }
+
+        this.$message.success('YAML格式验证通过')
+        return true
+      } catch (error) {
+        this.$message.error('YAML格式验证失败: ' + error.message)
+        return false
       }
     },
-    onSubmit() {
-      this.$refs.form.validate((valid) => {
-        if (valid) {
-          this.loading = true
-          
-          const gateway = {
-            apiVersion: "networking.istio.io/v1beta1",
-            kind: "Gateway",
-            metadata: {
-              name: this.form.name,
-              namespace: this.form.namespace
-            },
-            spec: {
-              selector: this.form.selectors.reduce((acc, selector) => {
-                if (selector.key && selector.value) {
-                  acc[selector.key] = selector.value
-                }
-                return acc
-              }, {}),
-              servers: this.form.servers.map(server => {
-                const serverSpec = {
-                  port: server.port,
-                  hosts: server.hosts
-                }
-                
-                if (server.port.protocol === 'HTTPS' || server.port.protocol === 'TLS') {
-                  serverSpec.tls = {}
-                  if (server.tls.mode) {
-                    serverSpec.tls.mode = server.tls.mode
-                  }
-                  if (server.tls.credentialName) {
-                    serverSpec.tls.credentialName = server.tls.credentialName
-                  }
-                }
-                
-                return serverSpec
-              })
+    onSubmitYaml() {
+      if (!this.validateYaml()) {
+        return
+      }
+
+      this.loading = true
+
+      try {
+        const yamlData = this.parseYamlToJson(this.yamlContent)
+
+        createGateway(this.cluster, yamlData.metadata.namespace, yamlData)
+          .then(() => {
+            this.$message({
+              type: "success",
+              message: this.$t("commons.msg.create_success")
+            })
+            this.$router.push({name: "Gateways", query: this.$route.query})
+          })
+          .catch(() => {
+            this.loading = false
+          })
+      } catch (error) {
+        this.loading = false
+        this.$message.error('YAML解析失败: ' + error.message)
+      }
+    },
+    parseYamlToJson(yamlStr) {
+      // 改进的YAML到JSON转换
+      try {
+        const lines = yamlStr.split('\n')
+        const result = {}
+        const stack = [{obj: result, indent: -1}]
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          if (line.trim() === '' || line.trim().startsWith('#')) continue
+
+          const indent = line.length - line.trimLeft().length
+          const content = line.trim()
+
+          // 调整栈深度
+          while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+            stack.pop()
+          }
+
+          const currentContext = stack[stack.length - 1]
+
+          if (content.startsWith('- ')) {
+            // 数组项
+            const arrayItem = content.substring(2).trim()
+
+            if (!Array.isArray(currentContext.obj)) {
+              // 转换为数组
+              const keys = Object.keys(currentContext.obj)
+              if (keys.length > 0) {
+                const lastKey = keys[keys.length - 1]
+                currentContext.obj[lastKey] = []
+                currentContext.obj = currentContext.obj[lastKey]
+              }
+            }
+
+            if (arrayItem.includes(':')) {
+              // 数组中的对象
+              const newObj = {}
+              currentContext.obj.push(newObj)
+              stack.push({obj: newObj, indent: indent})
+
+              const [key, value] = arrayItem.split(':').map(s => s.trim())
+              if (value) {
+                newObj[key] = this.parseValue(value)
+              } else {
+                newObj[key] = {}
+                stack.push({obj: newObj[key], indent: indent + 2})
+              }
+            } else {
+              // 简单数组项
+              currentContext.obj.push(this.parseValue(arrayItem))
+            }
+          } else if (content.includes(':')) {
+            // 键值对
+            const colonIndex = content.indexOf(':')
+            const key = content.substring(0, colonIndex).trim()
+            const value = content.substring(colonIndex + 1).trim()
+
+            if (value) {
+              currentContext.obj[key] = this.parseValue(value)
+            } else {
+              currentContext.obj[key] = {}
+              stack.push({obj: currentContext.obj[key], indent: indent})
             }
           }
-          
-          createGateway(this.cluster, this.form.namespace, gateway)
-            .then(() => {
-              this.$message({
-                type: "success",
-                message: this.$t("commons.msg.create_success")
-              })
-              this.$router.push({name: "Gateways", query: this.$route.query})
-            })
-            .finally(() => {
-              this.loading = false
-            })
         }
-      })
+
+        return result
+      } catch (error) {
+        console.error('YAML解析错误:', error)
+        throw new Error('YAML解析失败，请检查格式: ' + error.message)
+      }
+    },
+    parseValue(value) {
+      if (value.startsWith('"') && value.endsWith('"')) {
+        return value.slice(1, -1)
+      } else if (value.startsWith("'") && value.endsWith("'")) {
+        return value.slice(1, -1)
+      } else if (value === 'true') {
+        return true
+      } else if (value === 'false') {
+        return false
+      } else if (value === 'null') {
+        return null
+      } else if (!isNaN(value) && !isNaN(parseFloat(value))) {
+        return parseFloat(value)
+      } else {
+        return value
+      }
     },
     onCancel() {
       this.$router.push({name: "Gateways", query: this.$route.query})
@@ -240,10 +218,42 @@ export default {
   },
   created() {
     this.cluster = this.$route.query.cluster
-    this.form.namespace = this.$route.query.namespace || "default"
   }
 }
 </script>
 
 <style scoped>
+.yaml-editor-container {
+  border: 1px solid #4a5568;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  min-height: 500px;
+  background: #1a202c;
+}
+
+.yaml-editor {
+  width: 100%;
+  height: 500px;
+  min-height: 500px;
+  border: none;
+  padding: 15px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 14px;
+  resize: vertical;
+  outline: none;
+  background: #1a202c;
+  color: #e2e8f0;
+  box-sizing: border-box;
+  line-height: 1.5;
+}
+
+.yaml-editor:focus {
+  border: none;
+  outline: none;
+  background: #1a202c;
+}
+
+.yaml-editor::placeholder {
+  color: #718096;
+}
 </style>

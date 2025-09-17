@@ -391,7 +391,9 @@ func matchRoles(requestResource, requestMethod string, rs []v1Role.Role) (bool, 
 func resourceNameInvalidHandler() iris.Handler {
 	return func(ctx *context.Context) {
 		r := ctx.GetCurrentRoute()
-		if strings.Contains(r.Path(), "/:name") {
+		// 只有当路径以 /:name 结尾或包含 /:name/ 时才检查
+		path := r.Path()
+		if strings.HasSuffix(path, "/:name") || strings.Contains(path, "/:name/") {
 			resourceName := ctx.Params().GetString("name")
 			if resourceName == "" {
 				ctx.StatusCode(iris.StatusBadRequest)

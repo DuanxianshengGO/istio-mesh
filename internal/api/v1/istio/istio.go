@@ -1,6 +1,7 @@
 package istio
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -254,6 +255,7 @@ func (h *Handler) GetTrafficAnalytics() iris.Handler {
 
 // proxyToKubernetes 代理请求到 Kubernetes API
 func (h *Handler) proxyToKubernetes(ctx *context.Context, clusterName, apiPath string) {
+
 	// 获取集群信息
 	c, err := h.clusterService.Get(clusterName, common.DBOptions{})
 	if err != nil {
@@ -280,8 +282,19 @@ func (h *Handler) proxyToKubernetes(ctx *context.Context, clusterName, apiPath s
 	// 构建完整的 API URL
 	fullURL := fmt.Sprintf("%s%s", c.Spec.Connect.Forward.ApiServer, apiPath)
 
+	// 读取请求体用于调试
+	bodyBytes, err := io.ReadAll(ctx.Request().Body)
+	if err != nil {
+		ctx.StatusCode(iris.StatusInternalServerError)
+		ctx.Values().Set("message", err.Error())
+		return
+	}
+
+	// 创建新的请求体
+	bodyReader := bytes.NewReader(bodyBytes)
+
 	// 创建 HTTP 请求
-	req, err := http.NewRequest(ctx.Request().Method, fullURL, ctx.Request().Body)
+	req, err := http.NewRequest(ctx.Request().Method, fullURL, bodyReader)
 	if err != nil {
 		ctx.StatusCode(iris.StatusInternalServerError)
 		ctx.Values().Set("message", err.Error())
@@ -343,9 +356,6 @@ func (h *Handler) proxyToKubernetes(ctx *context.Context, clusterName, apiPath s
 
 		ctx.JSON(response)
 	} else {
-		// 错误响应，先记录原始错误用于调试
-		fmt.Printf("Kubernetes API Error: %s\n", string(body))
-
 		// 解析Kubernetes错误并包装成KubePi格式
 		var k8sError map[string]interface{}
 		if err := json.Unmarshal(body, &k8sError); err != nil {

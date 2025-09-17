@@ -1,0 +1,103 @@
+{
+  "apiVersion": "networking.istio.io/v1beta1",
+  "kind": "VirtualService",
+  "metadata": {
+    "annotations": {
+      "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"networking.istio.io/v1\",\"kind\":\"VirtualService\",\"metadata\":{\"annotations\":{},\"name\":\"trafficlabel-vs-secp-tomcat\",\"namespace\":\"default\"},\"spec\":{\"hosts\":[\"secp-tomcat\"],\"http\":[{\"match\":[{\"headers\":{\"version\":{\"exact\":\"green\"}}}],\"route\":[{\"destination\":{\"host\":\"secp-tomcat\",\"subset\":\"green\"}}]},{\"route\":[{\"destination\":{\"host\":\"secp-tomcat\",\"subset\":\"blue\"}}]}]}}\n"
+    },
+    "creationTimestamp": "2025-09-09T03:33:52Z",
+    "generation": 6,
+    "managedFields": [
+      {
+        "apiVersion": "networking.istio.io/v1",
+        "fieldsType": "FieldsV1",
+        "fieldsV1": {
+          "f:metadata": {
+            "f:annotations": {
+              ".": {},
+              "f:kubectl.kubernetes.io/last-applied-configuration": {}
+            }
+          },
+          "f:spec": {
+            ".": {},
+            "f:hosts": {}
+          }
+        },
+        "manager": "kubectl-client-side-apply",
+        "operation": "Update",
+        "time": "2025-09-09T03:33:52Z"
+      },
+      {
+        "apiVersion": "networking.istio.io/v1beta1",
+        "fieldsType": "FieldsV1",
+        "fieldsV1": {
+          "f:spec": {
+            "f:http": {}
+          }
+        },
+        "manager": "Go-http-client",
+        "operation": "Update",
+        "time": "2025-09-16T08:23:10Z"
+      }
+    ],
+    "name": "trafficlabel-vs-secp-tomcat",
+    "namespace": "default",
+    "resourceVersion": "118000015",
+    "uid": "49c37643-881a-4ab5-84b8-96ccc19dccd5"
+  },
+  "spec": {
+    "hosts": [
+      "secp-tomcat"
+    ],
+    "http": [
+      {
+        "match": [
+          {
+            "headers": {
+              "version": {
+                "exact": "blue"
+              }
+            }
+          }
+        ],
+        "route": [
+          {
+            "destination": {
+              "host": "secp-tomcat",
+              "subset": "blue"
+            }
+          }
+        ]
+      },
+      {
+        "match": [
+          {
+            "headers": {
+              "version": {
+                "exact": "red"
+              }
+            }
+          }
+        ],
+        "route": [
+          {
+            "destination": {
+              "host": "secp-tomcat",
+              "subset": "red"
+            }
+          }
+        ]
+      },
+      {
+        "route": [
+          {
+            "destination": {
+              "host": "secp-tomcat",
+              "subset": "green"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
