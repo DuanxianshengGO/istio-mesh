@@ -843,15 +843,20 @@ func (h *Handler) analyzePodTrafficWithSubsets(podName, serviceName string, podL
 
 		// 检查Pod标签是否匹配subset标签
 		if h.podMatchesSubsetLabels(podLabels, subset) {
-			// 检查这个subset是否有流量路由
-			trafficType := h.getSubsetTrafficType(serviceName, subsetName, virtualServices)
-			matchContent := h.getSubsetMatchContent(serviceName, subsetName, virtualServices)
-			results = append(results, map[string]interface{}{
-				"type":         trafficType,
-				"vsName":       h.getVSNameForSubset(serviceName, subsetName, virtualServices),
-				"subset":       subsetName,
-				"matchContent": matchContent,
-			})
+			// 检查这个subset的所有流量类型
+			trafficTypes := h.getSubsetTrafficTypes(serviceName, subsetName, virtualServices)
+			vsName := h.getVSNameForSubset(serviceName, subsetName, virtualServices)
+
+			// 为每种流量类型创建一条记录
+			for _, trafficType := range trafficTypes {
+				matchContent := h.getSubsetMatchContentByType(serviceName, subsetName, trafficType, virtualServices)
+				results = append(results, map[string]interface{}{
+					"type":         trafficType,
+					"vsName":       vsName,
+					"subset":       subsetName,
+					"matchContent": matchContent,
+				})
+			}
 		}
 	}
 
@@ -879,8 +884,10 @@ func (h *Handler) podMatchesSubsetLabels(podLabels map[string]string, subset map
 	return false
 }
 
-// getSubsetTrafficType 获取subset的流量类型
-func (h *Handler) getSubsetTrafficType(serviceName, subsetName string, virtualServices []map[string]interface{}) string {
+// getSubsetTrafficTypes 获取subset的所有流量类型
+func (h *Handler) getSubsetTrafficTypes(serviceName, subsetName string, virtualServices []map[string]interface{}) []string {
+	trafficTypes := make(map[string]bool)
+
 	for _, vs := range virtualServices {
 		if spec, ok := vs["spec"].(map[string]interface{}); ok {
 			// 检查hosts是否匹配
@@ -917,9 +924,9 @@ func (h *Handler) getSubsetTrafficType(serviceName, subsetName string, virtualSe
 										if subset, ok := destInfo["subset"].(string); ok && subset == subsetName {
 											// 检查是否有match条件
 											if _, hasMatch := route["match"]; hasMatch {
-												return "灰度流量"
+												trafficTypes["灰度流量"] = true
 											} else {
-												return "基础流量"
+												trafficTypes["基础流量"] = true
 											}
 										}
 									}
@@ -930,6 +937,34 @@ func (h *Handler) getSubsetTrafficType(serviceName, subsetName string, virtualSe
 				}
 			}
 		}
+	}
+
+	// 转换为字符串数组
+	var result []string
+	for trafficType := range trafficTypes {
+		result = append(result, trafficType)
+	}
+
+	if len(result) == 0 {
+		return []string{"未进行灰度"}
+	}
+
+	return result
+}
+
+// getSubsetTrafficType 获取subset的流量类型（保持向后兼容）
+func (h *Handler) getSubsetTrafficType(serviceName, subsetName string, virtualServices []map[string]interface{}) string {
+	types := h.getSubsetTrafficTypes(serviceName, subsetName, virtualServices)
+	if len(types) > 1 {
+		// 如果有多种类型，优先返回灰度流量
+		for _, t := range types {
+			if t == "灰度流量" {
+				return "灰度流量+基础流量"
+			}
+		}
+	}
+	if len(types) > 0 {
+		return types[0]
 	}
 	return "未进行灰度"
 }
@@ -1077,6 +1112,120 @@ func (h *Handler) getSubsetMatchContent(serviceName, subsetName string, virtualS
 		}
 	}
 
+	return strings.Join(matchContents, "; ")
+}
+
+// getSubsetMatchContentByType 根据流量类型获取subset对应的匹配内容
+func (h *Handler) getSubsetMatchContentByType(serviceName, subsetName, trafficType string, virtualServices []map[string]interface{}) string {
+	var matchContents []string
+
+	for _, vs := range virtualServices {
+		if spec, ok := vs["spec"].(map[string]interface{}); ok {
+			// 检查hosts是否匹配
+			hosts := []string{}
+			if hostsInterface, ok := spec["hosts"].([]interface{}); ok {
+				for _, host := range hostsInterface {
+					if hostStr, ok := host.(string); ok {
+						hosts = append(hosts, hostStr)
+					}
+				}
+			}
+
+			serviceMatched := false
+			for _, host := range hosts {
+				if host == serviceName || strings.Contains(host, serviceName) {
+					serviceMatched = true
+					break
+				}
+			}
+
+			if !serviceMatched {
+				continue
+			}
+
+			// 检查HTTP路由
+			if httpRoutes, ok := spec["http"].([]interface{}); ok {
+				for _, httpRoute := range httpRoutes {
+					if route, ok := httpRoute.(map[string]interface{}); ok {
+						// 检查route目标是否匹配subset
+						if routeDestinations, ok := route["route"].([]interface{}); ok {
+							subsetMatched := false
+							for _, dest := range routeDestinations {
+								if destination, ok := dest.(map[string]interface{}); ok {
+									if destInfo, ok := destination["destination"].(map[string]interface{}); ok {
+										if subset, ok := destInfo["subset"].(string); ok && subset == subsetName {
+											subsetMatched = true
+											break
+										}
+									}
+								}
+							}
+
+							// 如果subset匹配，根据流量类型处理
+							if subsetMatched {
+								hasMatch := false
+								if _, ok := route["match"].([]interface{}); ok {
+									hasMatch = true
+								}
+
+								// 根据流量类型决定是否处理这个路由
+								shouldProcess := false
+								if trafficType == "灰度流量" && hasMatch {
+									shouldProcess = true
+								} else if trafficType == "基础流量" && !hasMatch {
+									shouldProcess = true
+								}
+
+								if shouldProcess {
+									if trafficType == "灰度流量" {
+										// 处理灰度流量的match条件
+										if matches, ok := route["match"].([]interface{}); ok {
+											for _, match := range matches {
+												if matchMap, ok := match.(map[string]interface{}); ok {
+													var conditions []string
+
+													// 处理URI匹配
+													if uri, ok := matchMap["uri"].(map[string]interface{}); ok {
+														for key, value := range uri {
+															conditions = append(conditions, fmt.Sprintf("URI %s: %v", key, value))
+														}
+													}
+
+													// 处理Header匹配
+													if headers, ok := matchMap["headers"].(map[string]interface{}); ok {
+														for headerName, headerValue := range headers {
+															if headerMap, ok := headerValue.(map[string]interface{}); ok {
+																for key, value := range headerMap {
+																	conditions = append(conditions, fmt.Sprintf("Header %s %s: %v", headerName, key, value))
+																}
+															} else {
+																conditions = append(conditions, fmt.Sprintf("Header %s: %v", headerName, headerValue))
+															}
+														}
+													}
+
+													if len(conditions) > 0 {
+														matchContents = append(matchContents, strings.Join(conditions, ", "))
+													}
+												}
+											}
+										}
+									} else if trafficType == "基础流量" {
+										// 基础流量没有特殊匹配条件
+										matchContents = append(matchContents, "默认路由")
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(matchContents) == 0 {
+		return "无匹配条件"
+	}
 	return strings.Join(matchContents, "; ")
 }
 
