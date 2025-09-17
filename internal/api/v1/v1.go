@@ -44,7 +44,7 @@ import (
 	"github.com/kataras/iris/v12/core/router"
 )
 
-var resourceWhiteList = WhiteList{"sessions", "proxy", "ws", "charts", "webkubectl", "apps", "mfa", "pod"}
+var resourceWhiteList = WhiteList{"sessions", "proxy", "ws", "charts", "webkubectl", "apps", "mfa", "pod", "istio"}
 
 type WhiteList []string
 

@@ -41,6 +41,7 @@ const message = {
             all_select: "All",
             upload: "Upload",
             search: "Search",
+            reset: "Reset",
             rbac_manage: "RBAC Manage",
             sync: "Sync",
             bind: "Bind",

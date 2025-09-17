@@ -41,6 +41,7 @@ const message = {
       edit: "Edit",
       edit_yaml: "Edit YAML",
       search: "Search",
+      reset: "Reset",
       upload: "Read from file",
       view_form: "View Form",
       view_yaml: "View YAML",

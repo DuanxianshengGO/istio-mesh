@@ -42,6 +42,7 @@ const message = {
       edit: "编辑",
       edit_yaml: "编辑 YAML",
       search: "搜索",
+      reset: "重置",
       upload: "从文件读取",
       view_form: "查看表单",
       view_yaml: "查看 YAML",

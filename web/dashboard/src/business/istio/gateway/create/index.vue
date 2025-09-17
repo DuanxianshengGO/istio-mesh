@@ -45,7 +45,8 @@ export default {
     return {
       cluster: "",
       loading: false,
-      yamlData: {}
+      yamlData: {},
+      yamlContent: ""
     }
   },
   methods: {
@@ -74,17 +75,20 @@ spec:
       credentialName: example-tls
     hosts:
     - example.com`
+
+      // 设置YAML编辑器的值
+      this.$refs.yaml_editor.setValue(this.yamlContent)
     },
     validateYaml() {
       try {
-        if (!this.yamlContent.trim()) {
+        const yamlData = this.$refs.yaml_editor.getValue()
+
+        if (!yamlData) {
           this.$message.error('YAML内容不能为空')
           return false
         }
 
-        if (!this.yamlContent.includes('apiVersion') ||
-            !this.yamlContent.includes('kind') ||
-            !this.yamlContent.includes('metadata')) {
+        if (!yamlData.apiVersion || !yamlData.kind || !yamlData.metadata) {
           this.$message.error('YAML格式不正确，缺少必要字段')
           return false
         }
@@ -97,14 +101,17 @@ spec:
       }
     },
     onSubmitYaml() {
-      if (!this.validateYaml()) {
-        return
-      }
-
       this.loading = true
 
       try {
-        const yamlData = this.parseYamlToJson(this.yamlContent)
+        // 直接从YAML编辑器获取解析后的对象
+        const yamlData = this.$refs.yaml_editor.getValue()
+
+        if (!yamlData || !yamlData.metadata || !yamlData.metadata.namespace) {
+          this.$message.error('YAML格式不正确，缺少必要的metadata.namespace字段')
+          this.loading = false
+          return
+        }
 
         createGateway(this.cluster, yamlData.metadata.namespace, yamlData)
           .then(() => {
@@ -114,107 +121,21 @@ spec:
             })
             this.$router.push({name: "Gateways", query: this.$route.query})
           })
-          .catch(() => {
+          .catch((error) => {
             this.loading = false
+            console.error('Gateway创建失败:', error)
+            this.$message.error('创建失败: ' + (error.response?.data?.message || error.message))
           })
       } catch (error) {
         this.loading = false
+        console.error('YAML解析失败:', error)
         this.$message.error('YAML解析失败: ' + error.message)
-      }
-    },
-    parseYamlToJson(yamlStr) {
-      // 改进的YAML到JSON转换
-      try {
-        const lines = yamlStr.split('\n')
-        const result = {}
-        const stack = [{obj: result, indent: -1}]
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          if (line.trim() === '' || line.trim().startsWith('#')) continue
-
-          const indent = line.length - line.trimLeft().length
-          const content = line.trim()
-
-          // 调整栈深度
-          while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
-            stack.pop()
-          }
-
-          const currentContext = stack[stack.length - 1]
-
-          if (content.startsWith('- ')) {
-            // 数组项
-            const arrayItem = content.substring(2).trim()
-
-            if (!Array.isArray(currentContext.obj)) {
-              // 转换为数组
-              const keys = Object.keys(currentContext.obj)
-              if (keys.length > 0) {
-                const lastKey = keys[keys.length - 1]
-                currentContext.obj[lastKey] = []
-                currentContext.obj = currentContext.obj[lastKey]
-              }
-            }
-
-            if (arrayItem.includes(':')) {
-              // 数组中的对象
-              const newObj = {}
-              currentContext.obj.push(newObj)
-              stack.push({obj: newObj, indent: indent})
-
-              const [key, value] = arrayItem.split(':').map(s => s.trim())
-              if (value) {
-                newObj[key] = this.parseValue(value)
-              } else {
-                newObj[key] = {}
-                stack.push({obj: newObj[key], indent: indent + 2})
-              }
-            } else {
-              // 简单数组项
-              currentContext.obj.push(this.parseValue(arrayItem))
-            }
-          } else if (content.includes(':')) {
-            // 键值对
-            const colonIndex = content.indexOf(':')
-            const key = content.substring(0, colonIndex).trim()
-            const value = content.substring(colonIndex + 1).trim()
-
-            if (value) {
-              currentContext.obj[key] = this.parseValue(value)
-            } else {
-              currentContext.obj[key] = {}
-              stack.push({obj: currentContext.obj[key], indent: indent})
-            }
-          }
-        }
-
-        return result
-      } catch (error) {
-        console.error('YAML解析错误:', error)
-        throw new Error('YAML解析失败，请检查格式: ' + error.message)
-      }
-    },
-    parseValue(value) {
-      if (value.startsWith('"') && value.endsWith('"')) {
-        return value.slice(1, -1)
-      } else if (value.startsWith("'") && value.endsWith("'")) {
-        return value.slice(1, -1)
-      } else if (value === 'true') {
-        return true
-      } else if (value === 'false') {
-        return false
-      } else if (value === 'null') {
-        return null
-      } else if (!isNaN(value) && !isNaN(parseFloat(value))) {
-        return parseFloat(value)
-      } else {
-        return value
       }
     },
     onCancel() {
       this.$router.push({name: "Gateways", query: this.$route.query})
-    }
+    },
+
   },
   created() {
     this.cluster = this.$route.query.cluster

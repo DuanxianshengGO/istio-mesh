@@ -104,6 +104,11 @@ export default {
       let yaml = require("js-yaml")
       return yaml.load(this.content)
     },
+    setValue (yamlString) {
+      if (this.$refs.editor && this.$refs.editor.codemirror) {
+        this.$refs.editor.codemirror.setValue(yamlString)
+      }
+    },
     readFile (file) {
       const reader = new FileReader()
       reader.readAsText(file)

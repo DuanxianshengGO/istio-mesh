@@ -22,7 +22,6 @@
           </el-form-item>
           <el-form-item>
             <el-button type="primary" @click="loadTrafficAnalytics">{{ $t('commons.button.search') }}</el-button>
-            <el-button @click="resetFilter">{{ $t('commons.button.reset') }}</el-button>
           </el-form-item>
         </el-form>
       </el-card>
@@ -60,11 +59,11 @@
         <div slot="header">
           <span>流量分析详情</span>
         </div>
-        <el-table :data="filteredTrafficData" style="width: 100%" size="small">
-          <el-table-column prop="podName" label="Pod名称" min-width="200"></el-table-column>
-          <el-table-column prop="serviceName" label="Service" min-width="150"></el-table-column>
-          <el-table-column prop="vsName" label="VirtualService" min-width="200"></el-table-column>
-          <el-table-column prop="trafficType" label="流量类型" width="120">
+        <el-table :data="filteredTrafficData" style="width: 100%" size="small" :show-header="true">
+          <el-table-column prop="podName" label="Pod名称" min-width="200" :filterable="false"></el-table-column>
+          <el-table-column prop="serviceName" label="Service" min-width="150" :filterable="false"></el-table-column>
+          <el-table-column prop="vsName" label="VirtualService" min-width="200" :filterable="false"></el-table-column>
+          <el-table-column prop="trafficType" label="流量类型" width="120" :filterable="false">
             <template slot-scope="scope">
               <el-tag
                 :type="getTrafficTypeColor(scope.row.trafficType)"
@@ -73,8 +72,8 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="subset" label="Subset" width="120"></el-table-column>
-          <el-table-column prop="matchContent" :label="$t('business.istio.match_content')" min-width="200">
+          <el-table-column prop="subset" label="Subset" width="120" :filterable="false"></el-table-column>
+          <el-table-column prop="matchContent" :label="$t('business.istio.match_content')" min-width="200" :filterable="false">
             <template slot-scope="scope">
               <el-tooltip v-if="scope.row.matchContent" :content="scope.row.matchContent" placement="top">
                 <span class="match-content-text">{{ scope.row.matchContent }}</span>
@@ -185,19 +184,12 @@ export default {
     onNamespaceChange() {
       this.loadTrafficAnalytics()
     },
-    resetFilter() {
-      this.filterForm = {
-        namespace: "",
-        service: ""
-      }
-      this.loadTrafficAnalytics()
-    },
+
 
   },
   created() {
     this.cluster = this.$route.query.cluster
     this.filterForm.namespace = this.$route.query.namespace || ""
-    this.loadServices()
     this.loadTrafficAnalytics()
   },
 
@@ -234,5 +226,28 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: middle;
+}
+
+/* 隐藏所有可能的重置按钮 */
+::v-deep .el-button {
+  &:contains('commons.button.reset') {
+    display: none !important;
+  }
+}
+
+/* 隐藏表格过滤器相关按钮 */
+::v-deep .el-table__column-filter-trigger {
+  display: none !important;
+}
+
+::v-deep .el-table-filter__bottom {
+  display: none !important;
+}
+
+/* 隐藏包含特定文本的按钮 */
+::v-deep button[data-v-27185e19] {
+  &:contains('commons.button.reset') {
+    display: none !important;
+  }
 }
 </style>

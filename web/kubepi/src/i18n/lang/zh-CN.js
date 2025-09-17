@@ -41,6 +41,7 @@ const message = {
             all_select: "全选",
             upload: "上传文件",
             search: "搜索",
+            reset: "重置",
             rbac_manage: "授权",
             sync: "同步",
             bind: "绑定",
