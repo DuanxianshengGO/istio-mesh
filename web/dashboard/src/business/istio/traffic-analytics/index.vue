@@ -136,7 +136,30 @@ export default {
         data = data.filter(item => item.serviceName === this.filterForm.service)
       }
 
-      return data
+      // 按流量类型排序：灰度流量 -> 基础流量 -> 原生流量
+      return data.sort((a, b) => {
+        const getTrafficTypePriority = (type) => {
+          if (type === '灰度流量') return 1
+          if (type === '基础流量') return 2
+          if (type === '原生流量') return 3
+          return 4
+        }
+
+        const priorityA = getTrafficTypePriority(a.trafficType)
+        const priorityB = getTrafficTypePriority(b.trafficType)
+
+        if (priorityA !== priorityB) {
+          return priorityA - priorityB
+        }
+
+        // 如果流量类型相同，按服务名称排序
+        if (a.serviceName !== b.serviceName) {
+          return a.serviceName.localeCompare(b.serviceName)
+        }
+
+        // 如果服务名称也相同，按Pod名称排序
+        return a.podName.localeCompare(b.podName)
+      })
     }
   },
   methods: {

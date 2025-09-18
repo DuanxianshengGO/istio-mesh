@@ -652,7 +652,7 @@ func (h *Handler) analyzeTrafficFlow(virtualServices, destinationRules, pods []m
 			"totalDR":      len(destinationRules),
 			"basicTraffic": h.countTrafficType(trafficAnalysis, "基础流量"),
 			"grayTraffic":  h.countTrafficType(trafficAnalysis, "灰度流量"),
-			"noTraffic":    h.countTrafficType(trafficAnalysis, "未进行灰度"),
+			"noTraffic":    h.countTrafficType(trafficAnalysis, "原生流量"),
 		},
 	}
 }
@@ -670,9 +670,9 @@ func (h *Handler) countTrafficType(trafficAnalysis []map[string]interface{}, tra
 
 // analyzePodTraffic 分析单个Pod的流量类型
 func (h *Handler) analyzePodTraffic(podName, serviceName string, podLabels map[string]string, virtualServices []map[string]interface{}, drMap map[string]map[string]interface{}) map[string]interface{} {
-	// 默认返回未进行灰度
+	// 默认返回原生流量
 	result := map[string]interface{}{
-		"type":   "未进行灰度",
+		"type":   "原生流量",
 		"vsName": "",
 		"subset": nil,
 	}
@@ -946,7 +946,7 @@ func (h *Handler) getSubsetTrafficTypes(serviceName, subsetName string, virtualS
 	}
 
 	if len(result) == 0 {
-		return []string{"未进行灰度"}
+		return []string{"原生流量"}
 	}
 
 	return result
@@ -966,7 +966,7 @@ func (h *Handler) getSubsetTrafficType(serviceName, subsetName string, virtualSe
 	if len(types) > 0 {
 		return types[0]
 	}
-	return "未进行灰度"
+	return "原生流量"
 }
 
 // getVSNameForSubset 获取subset对应的VirtualService名称
